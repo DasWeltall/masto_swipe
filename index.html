@@ -3,25 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>MastoSwipe – One-Card Mobile Feed</title>
+<title>MastoSwipe</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-
 <style>
-:root{
-  --bg:#fafafa;--card:#ffffff;--accent:#0284c7;
-  --txt:#1e293b;--tag:#e2e8f0;--sub:#64748b;
-  --nav:66px
-}
+:root{--bg:#fafafa;--card:#fff;--accent:#0284c7;--txt:#1e293b;--sub:#64748b;--tag:#e2e8f0;--nav:66px}
 *{box-sizing:border-box;margin:0;font-family:'Inter',sans-serif;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;background:var(--bg);color:var(--txt);display:flex;flex-direction:column;overscroll-behavior:none}
 main{flex:1;display:flex;align-items:center;justify-content:center;padding:14px}
 nav{position:fixed;bottom:0;width:100%;height:var(--nav);display:flex;background:#fff;border-top:1px solid #e2e8f0;z-index:10}
 nav button{flex:1;background:none;border:0;color:var(--sub);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:.8rem;gap:.2rem;cursor:pointer}
 nav button.active{color:var(--accent)} nav svg{width:24px;height:24px}
-
 /* Card */
-.card{width:100%;max-width:680px;height:100%;border-radius:18px;background:var(--card);box-shadow:0 8px 28px rgba(0,0,0,.08);display:flex;flex-direction:column;overflow:hidden}
+.card{position:relative;width:100%;max-width:680px;height:100%;border-radius:18px;background:var(--card);box-shadow:0 8px 28px rgba(0,0,0,.08);display:flex;flex-direction:column;overflow:hidden}
 .card img.banner{width:100%;height:220px;object-fit:cover}
 .content{padding:1.4rem 1.3rem 2.4rem;overflow-y:auto}
 .card h2{font-size:1.23rem;font-weight:600;color:var(--accent);margin-bottom:.55rem}
@@ -31,7 +25,9 @@ nav button.active{color:var(--accent)} nav svg{width:24px;height:24px}
 .linkMeta{padding:.9rem .25rem}
 .linkMeta .t{font-size:1.02rem;font-weight:600;margin-bottom:.3rem}
 .linkMeta .d{font-size:.85rem;color:var(--sub);line-height:1.35}
-
+/* Heart overlay */
+.heart{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(.2);font-size:5rem;color:var(--accent);pointer-events:none;opacity:0;transition:transform .3s ease,opacity .3s ease}
+/* Home & Settings */
 .section{padding:1.3rem 1rem 2.8rem}
 .tag,.acct{display:inline-block;background:var(--tag);margin:.35rem .5rem .35rem 0;padding:.5rem .9rem;border-radius:999px;font-size:.85rem;color:#334155}
 .empty{color:var(--sub);font-size:.9rem;margin-top:1rem;text-align:center}
@@ -46,7 +42,6 @@ button.set{border:0;font-weight:600;cursor:pointer}
 <body>
 
 <main id="stage"></main>
-
 <nav>
   <button data-tab="home" class="active"><i data-lucide="compass"></i><span>Home</span></button>
   <button data-tab="swipe"><i data-lucide="layout"></i><span>Swipe</span></button>
@@ -56,7 +51,7 @@ button.set{border:0;font-weight:600;cursor:pointer}
 <script type="module">
 lucide.createIcons();
 
-/* ---------- Storage ---------- */
+/* --- Storage & State --- */
 const K={i:'m_i',c:'m_c',s:'m_s',t:'m_t',v:'m_v',int:'m_int',pref:'m_pref'};
 let inst=localStorage.getItem(K.i)||'',cid=localStorage.getItem(K.c)||'',sec=localStorage.getItem(K.s)||'',tok=localStorage.getItem(K.t)||'';
 let posts=[],idx=0,next=null;
@@ -64,12 +59,10 @@ const inter=JSON.parse(localStorage.getItem(K.int)||'{}');
 const prefs=JSON.parse(localStorage.getItem(K.pref)||'{"tags":{},"accounts":{},"topics":{}}');
 const save=()=>{localStorage.setItem(K.int,JSON.stringify(inter));localStorage.setItem(K.pref,JSON.stringify(prefs));};
 
-/* ---------- Topic Mapping ---------- */
-const TOPIC_MAP={
-  wirtschaft:'Economy',business:'Economy',hardware:'Hardware',opensrc:'Open-Source',opensource:'Open-Source',linux:'Open-Source'
-};
+/* --- Topics --- */
+const TOPIC={hardware:'Hardware',wirtschaft:'Economy',business:'Economy',opensource:'Open-Source',foss:'Open-Source',linux:'Open-Source'};
 
-/* ---------- Utilities ---------- */
+/* --- Utils --- */
 const $=q=>document.querySelector(q);
 const rnd=()=>crypto.randomUUID().replace(/-/g,'');
 const sha=async s=>btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
@@ -80,107 +73,108 @@ function score(p){
   const i=inter[p.id],pop=Math.log10(1+p.favourites_count+p.reblogs_count),dec=-.08*hrs(new Date(p.created_at));
   const tag=(p.tags||[]).reduce((s,t)=>s+(prefs.tags[t.name]||0)*.5,0);
   const acc=(prefs.accounts[p.account.id]||0)*1.5;
-  const top=(p.tags||[]).reduce((s,t)=>s+(prefs.topics[TOPIC_MAP[t.name.toLowerCase()]||'']||0)*.7,0);
+  const top=(p.tags||[]).reduce((s,t)=>s+(prefs.topics[TOPIC[t.name.toLowerCase()]||'']||0)*.7,0);
   return i.c*3+i.v+i.d*.15+i.l*5+pop+tag+acc+top+dec;
 }
-async function api(p,m='GET'){
-  const url=p.startsWith('http')?p:inst+p;const r=await fetch(url,{method:m,headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)throw r;
-  if(p.includes('/timelines/home')){const l=r.headers.get('Link');next=null;if(l){const m=l.match(/<([^>]+)>; rel=\"next\"/);if(m)next=m[1];}}
-  return r.json();
-}
+async function api(p,m='GET'){const u=p.startsWith('http')?p:inst+p;const r=await fetch(u,{method:m,headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)throw r;if(p.includes('/timelines/home')){const l=r.headers.get('Link');next=null;if(l){const m=l.match(/<([^>]+)>; rel=\"next\"/);if(m)next=m[1];}}return r.json();}
 function merge(arr){arr.forEach(p=>{if(!posts.some(x=>x.id===p.id)){posts.push(p);ensure(p.id);}});posts.sort((a,b)=>score(b)-score(a));}
 
-/* ---------- Rendering helpers ---------- */
-function cardEl(p){
-  const wrap=document.createElement('div');wrap.className='card';
-  if(p.media_attachments?.[0]?.type==='image'){wrap.insertAdjacentHTML('beforeend',`<img src="${p.media_attachments[0].preview_url}" class="banner">`);}
-  const cont=document.createElement('div');cont.className='content';
-  cont.innerHTML=`<h2>${p.account.display_name||p.account.acct}</h2><p>${p.content.replace(/<[^>]+>/g,'')}</p>`;wrap.append(cont);
+/* --- Components --- */
+function card(p){
+  const w=document.createElement('div');w.className='card';
+  if(p.media_attachments?.[0]?.type==='image')w.insertAdjacentHTML('beforeend',`<img src="${p.media_attachments[0].preview_url}" class="banner">`);
+  const c=document.createElement('div');c.className='content';w.append(c);
+  c.innerHTML=`<h2>${p.account.display_name||p.account.acct}</h2><p>${p.content.replace(/<[^>]+>/g,'')}</p>`;
   if(p.card){
-    cont.insertAdjacentHTML('beforeend',`
-      <a href="${p.card.url}" target="_blank" class="linkHero">
-        ${p.card.image?`<img src="${p.card.image}" alt="">`:''}
-        <div class="linkMeta"><div class="t">${p.card.title}</div><div class="d">${p.card.provider_name||p.card.description||''}</div></div>
-      </a>`);
+    c.insertAdjacentHTML('beforeend',`<a class="linkHero" href="${p.card.url}" target="_blank">
+      ${p.card.image?`<img src="${p.card.image}">`:''}
+      <div class="linkMeta"><div class="t">${p.card.title}</div><div class="d">${p.card.provider_name||p.card.description||''}</div></div>
+    </a>`);
   }
-  wrap.ondblclick=()=>toggleLike(p);
-  wrap.onclick=()=>location.hash='#'+p.id;
-  return wrap;
+  const heart=document.createElement('div');heart.className='heart';heart.innerHTML='❤';w.append(heart);
+  w.ondblclick=()=>{toggleLike(p,heart);};
+  w.onclick=()=>location.hash='#'+p.id;
+  return w;
 }
 
-/* ---------- Pages ---------- */
+/* --- Pages --- */
 const stage=$('#stage');let tab='swipe';
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{if(b.dataset.tab===tab)return;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));tab=b.dataset.tab;render();});
 
-function homePage(){
+function home(){
   const box=document.createElement('div');box.className='section';
   box.innerHTML='<h3 style="font-weight:600;margin-bottom:.8rem">Kategorien</h3>';
-  const hotCats=Object.entries(prefs.topics).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  if(!hotCats.length)box.insertAdjacentHTML('beforeend','<p class="empty">Noch keine Kategorien – swipe ein paar Posts!</p>');
-  hotCats.forEach(([t])=>box.insertAdjacentHTML('beforeend',`<span class="tag">${t}</span>`));
-  const tagList=Object.entries(prefs.tags).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  if(tagList.length){
-    box.insertAdjacentHTML('beforeend','<h3 style="font-weight:600;margin:1.4rem 0 .8rem">Vorschläge</h3>');
-    const sug=tagList[0][0];box.insertAdjacentHTML('beforeend',`<div style="font-size:.9rem">Vielleicht #${sug} folgen?</div>`);
-  }
+  const cats=Object.entries(prefs.topics).sort((a,b)=>b[1]-a[1]);
+  if(!cats.length)box.insertAdjacentHTML('beforeend','<p class="empty">Swipe ein paar Posts, um Interessen zu sammeln.</p>');
+  cats.slice(0,6).forEach(([t])=>box.insertAdjacentHTML('beforeend',`<span class="tag">${t}</span>`));
+  /* Vorschläge */
+  const ht=Object.entries(prefs.tags).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
+  const sug=ht.find(t=>!(prefs.followedTags||[]).includes(t));
+  if(sug)box.insertAdjacentHTML('beforeend',`<h3 style="font-weight:600;margin:1.4rem 0 .8rem">Folge-Empfehlung</h3><span class="tag">#${sug}</span>`);
   stage.append(box);
 }
 
-function swipePage(){
-  stage.innerHTML='';const holder=document.createElement('div');holder.style.width='100%';holder.style.height='100%';stage.append(holder);
-  const show=()=>{holder.innerHTML='';if(!posts[idx])return;const p=posts[idx];inter[p.id].v++;(p.tags||[]).forEach(t=>{prefs.tags[t.name]=(prefs.tags[t.name]||0)+1;const cat=TOPIC_MAP[t.name.toLowerCase()];if(cat)prefs.topics[cat]=(prefs.topics[cat]||0)+1;});prefs.accounts[p.account.id]=(prefs.accounts[p.account.id]||0);save();holder.append(cardEl(p));};
+function swipe(){
+  stage.innerHTML='';
+  const holder=document.createElement('div');holder.style.width='100%';holder.style.height='100%';stage.append(holder);
+  const show=()=>{holder.innerHTML='';if(!posts[idx])return;const p=posts[idx];
+    inter[p.id].v++;(p.tags||[]).forEach(t=>{prefs.tags[t.name]=(prefs.tags[t.name]||0)+1;const cat=TOPIC[t.name.toLowerCase()];if(cat)prefs.topics[cat]=(prefs.topics[cat]||0)+1;});prefs.accounts[p.account.id]=(prefs.accounts[p.account.id]||0);save();holder.append(card(p));};
   let startY=null;
   holder.addEventListener('touchstart',e=>{if(e.touches.length===1)startY=e.touches[0].clientY;},{passive:true});
   holder.addEventListener('touchend',e=>{
-    if(startY==null)return;const dy=e.changedTouches[0].clientY-startY;const thresh=window.innerHeight*0.15;
-    if(dy<-thresh&&idx<posts.length-1){idx++;loadMore();show();}
-    else if(dy>thresh&&idx>0){idx--;show();}
+    if(startY==null)return;
+    const dy=e.changedTouches[0].clientY-startY,th=window.innerHeight*0.15;
+    if(dy<-th&&idx<posts.length-1){idx++;need();show();}
+    else if(dy>th&&idx>0){idx--;show();}
     startY=null;
   },{passive:true});
-  window.onhashchange=()=>{const id=location.hash.slice(1);if(!id){show();return;}const p=posts.find(x=>x.id==id);if(!p){show();return;}holder.innerHTML='';const d=document.createElement('div');d.className='card';d.style.overflowY='auto';d.innerHTML=cardEl(p).innerHTML;holder.append(d);};
-  const loadMore=()=>{if(posts.length-idx<4&&next)api(next).then(merge).catch(()=>{});} ;show();
+  window.onhashchange=()=>{const id=location.hash.slice(1);if(!id){show();return;}const p=posts.find(x=>x.id==id);if(!p){show();return;}holder.innerHTML='';const d=document.createElement('div');d.className='card';d.style.overflowY='auto';d.innerHTML=card(p).innerHTML;holder.append(d);};
+  const need=()=>{if(posts.length-idx<8&&next)api(next).then(merge).catch(()=>{});} ;show();
 }
 
-function settingsPage(){
+function settings(){
   stage.innerHTML='';const box=document.createElement('div');box.className='section';
   box.innerHTML=`<input id="inst" placeholder="https://mastodon.social" value="${inst}">
-    <button class="set" id="btnConnect">${tok?'Re-Login':'Connect'}</button>
-    <button class="set" id="btnLogout" ${tok?'':'disabled'}>Log-out</button>
-    <button class="set" id="btnExport" ${posts.length?'':'disabled'}>Export</button>
-    <button class="set" id="btnReset">Reset</button>`;
+  <button class="set" id="btnConnect">${tok?'Re-Login':'Connect'}</button>
+  <button class="set" id="btnLogout" ${tok?'':'disabled'}>Log-out</button>
+  <button class="set" id="btnExport" ${posts.length?'':'disabled'}>Export</button>
+  <button class="set" id="btnReset">Reset</button>`;
   stage.append(box);
-  $('#btnConnect').onclick=startOAuth;
+  $('#btnConnect').onclick=oauth;
   $('#btnLogout').onclick=()=>{localStorage.removeItem(K.t);tok='';posts=[];idx=0;render();};
-  $('#btnExport').onclick=()=>{const blob=new Blob([JSON.stringify({inter,prefs},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='masto-data.json';a.click();URL.revokeObjectURL(url);} ;
-  $('#btnReset').onclick=()=>{if(confirm('Daten löschen?')){Object.keys(inter).forEach(k=>delete inter[k]);Object.keys(prefs.tags).forEach(k=>delete prefs.tags[k]);Object.keys(prefs.accounts).forEach(k=>delete prefs.accounts[k]);Object.keys(prefs.topics).forEach(k=>delete prefs.topics[k]);save();render();}};
+  $('#btnExport').onclick=()=>{const blob=new Blob([JSON.stringify({inter,prefs},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='masto-data.json';a.click();URL.revokeObjectURL(url);};
+  $('#btnReset').onclick=()=>{if(confirm('wirklich löschen?')){Object.keys(inter).forEach(k=>delete inter[k]);Object.values(prefs).forEach(o=>Object.keys(o).forEach(k=>delete o[k]));save();render();}};
 }
 
-function render(){stage.innerHTML='';if(tab==='home')homePage();if(tab==='swipe')swipePage();if(tab==='settings')settingsPage();}
+function render(){stage.innerHTML='';if(tab==='home')home();if(tab==='swipe')swipe();if(tab==='settings')settings();}
 
-/* ---------- Like Toggle ---------- */
-async function toggleLike(p){
+/* --- Like Toggle + Herz Overlay --- */
+function toggleLike(p,heart){
   ensure(p.id);const liked=!!inter[p.id].l;
   api(`/api/v1/statuses/${p.id}/${liked?'unfavourite':'favourite'}`,'POST').catch(()=>{});
   inter[p.id].l=liked?0:1;save();
+  heart.style.opacity=1;heart.style.transform='translate(-50%,-50%) scale(1)';setTimeout(()=>{heart.style.opacity=0;heart.style.transform='translate(-50%,-50%) scale(.2)';},300);
 }
 
-/* ---------- Loading ---------- */
-async function init(){const j=await api('/api/v1/timelines/home?limit=50');merge(j);render();}
-async function refresh(){if(!tok)return;try{const fr=await api(`/api/v1/timelines/home?limit=30&since_id=${posts[0]?.id||''}`);if(fr.length){merge(fr);idx=0;tab!=='swipe'&&render();}}catch{}finally{setTimeout(refresh,90000);}}
+/* --- Loaders --- */
+async function init(){merge(await api('/api/v1/timelines/home?limit=60'));render();}
+async function refresh(){if(!tok)return;try{const fresh=await api(`/api/v1/timelines/home?limit=40&since_id=${posts[0]?.id||''}`);if(fresh.length){merge(fresh);idx=0;tab!=='swipe'&&render();}}catch{}finally{setTimeout(refresh,90000);}}
 
-/* ---------- OAuth ---------- */
-async function startOAuth(){inst=$('#inst').value.trim().replace(/\/$/,'');if(!inst)return;localStorage.setItem(K.i,inst);
+/* --- OAuth PKCE --- */
+async function oauth(){
+  inst=$('#inst').value.trim().replace(/\/$/,'');if(!inst)return;localStorage.setItem(K.i,inst);
   if(!cid){const app=await fetch(inst+'/api/v1/apps',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'MastoSwipe',redirect_uris:location.origin+location.pathname,scopes:'read write:statuses'})}).then(r=>r.json());cid=app.client_id;sec=app.client_secret;localStorage.setItem(K.c,cid);localStorage.setItem(K.s,sec);}
   const ver=rnd(),chal=await sha(ver);localStorage.setItem(K.v,ver);
-  const u=new URL(inst+'/oauth/authorize');u.searchParams.set('response_type','code');u.searchParams.set('client_id',cid);u.searchParams.set('redirect_uri',location.origin+location.pathname);u.searchParams.set('scope','read write:statuses');u.searchParams.set('code_challenge',chal);u.searchParams.set('code_challenge_method','S256');location.href=u.toString();}
+  const a=new URL(inst+'/oauth/authorize');a.searchParams.set('response_type','code');a.searchParams.set('client_id',cid);a.searchParams.set('redirect_uri',location.origin+location.pathname);a.searchParams.set('scope','read write:statuses');a.searchParams.set('code_challenge',chal);a.searchParams.set('code_challenge_method','S256');location.href=a.toString();
+}
 (async()=>{const sp=new URLSearchParams(location.search);
   if(sp.has('code')){inst=localStorage.getItem(K.i);cid=localStorage.getItem(K.c);const ver=localStorage.getItem(K.v);
     const body=new URLSearchParams({grant_type:'authorization_code',client_id:cid,code:sp.get('code'),redirect_uri:location.origin+location.pathname,code_verifier:ver});if(sec)body.append('client_secret',sec);
     const t=await fetch(inst+'/oauth/token',{method:'POST',body}).then(r=>r.json());tok=t.access_token;localStorage.setItem(K.t,tok);history.replaceState({},'',location.pathname);}
 })();
 
-/* ---------- Boot ---------- */
-if(tok&&inst){init();refresh();}else render();
+/* --- Boot --- */
+if(tok&&inst){init();refresh();}render();
 </script>
 </body>
 </html>
