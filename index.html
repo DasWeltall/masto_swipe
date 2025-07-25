@@ -52,6 +52,7 @@ let inst=localStorage.getItem(K.i)||'',cid=localStorage.getItem(K.c)||'',sec=loc
 let posts=[],idx=0,next=null,seen=new Set(JSON.parse(localStorage.getItem(K.seen)||'[]'));
 const inter=JSON.parse(localStorage.getItem(K.int)||'{}');
 const prefs=JSON.parse(localStorage.getItem(K.pref)||'{"tags":{},"accounts":{},"topics":{}}');
+let suggestions=[];   // follow suggestions
 const save=()=>{localStorage.setItem(K.int,JSON.stringify(inter));localStorage.setItem(K.pref,JSON.stringify(prefs));localStorage.setItem(K.seen,JSON.stringify([...seen]));};
 
 /* --- Utils --- */
@@ -59,14 +60,17 @@ const $=q=>document.querySelector(q);
 const rnd=()=>crypto.randomUUID().replace(/-/g,'');
 const sha=async s=>btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
 const now=()=>Date.now(),hrs=t=>(now()-t)/3.6e6;
+const keyOf=p=>p.reblog?p.reblog.id:p.id;  // kanonische ID (Boosts & Original gleich)
 function ensure(id){if(!inter[id])inter[id]={v:0,c:0,l:0,d:0};}
 function score(p){
-  ensure(p.id);
-  const i=inter[p.id],pop=Math.log10(1+p.favourites_count+p.reblogs_count),dec=-.08*hrs(new Date(p.created_at));
+  const key=keyOf(p);
+  ensure(key);
+  const i=inter[key],pop=Math.log10(1+p.favourites_count+p.reblogs_count),dec=-.08*hrs(new Date(p.created_at));
   const tagScore=(p.tags||[]).reduce((s,t)=>s+(prefs.tags[t.name.toLowerCase()]||0)*.5,0);
-  const acc=(prefs.accounts[p.account.id]||0)*1.5;
+  const accScore=(prefs.accounts[p.account.id]||0)*1.5;
   const topScore=(p.tags||[]).reduce((s,t)=>s+(prefs.topics[t.name.toLowerCase()]||0)*.7,0);
-  return i.c*3+i.v+i.d*.15+i.l*5+pop+tagScore+acc+topScore+dec;
+  const explo=Math.random()*0.3; // epsilon-greedy 0..0.3
+  return i.c*3+i.v+i.d*.15+i.l*5+pop+tagScore+accScore+topScore+dec+explo;
 }
 async function api(p,m='GET'){
   const u=p.startsWith('http')?p:inst+p;
@@ -81,17 +85,18 @@ async function api(p,m='GET'){
 }
 function merge(arr){
   arr.forEach(p=>{
-    if(!seen.has(p.id)){
+    const k=keyOf(p);
+    if(!seen.has(k)){
       posts.push(p);
-      ensure(p.id);
-      seen.add(p.id);
+      ensure(k);
+      seen.add(k);
     }
   });
   posts.sort((a,b)=>score(b)-score(a));
   localStorage.setItem(K.seen,JSON.stringify([...seen]));
 }
 
-/* --- Topic Learning --- */
+/* --- Topic & Tag Learning --- */
 function addTags(p){
   (p.tags||[]).forEach(t=>{
     const tag=t.name.toLowerCase();
@@ -101,12 +106,21 @@ function addTags(p){
   });
 }
 
+/* --- Trending & Suggestions --- */
+async function loadTrending(){
+  try{const ts=await api('/api/v1/trends/statuses?limit=40');ts.forEach(s=>s._suggested=true);merge(ts);}catch{}
+}
+async function loadSuggestions(){
+  if(!tok)return;try{suggestions=await api('/api/v2/suggestions?limit=10');}catch{}
+}
+
 /* --- Components --- */
 function card(p){
   const w=document.createElement('div');w.className='card';
   if(p.media_attachments?.[0]?.type==='image')w.insertAdjacentHTML('beforeend',`<img src="${p.media_attachments[0].preview_url}" class="banner">`);
   const c=document.createElement('div');c.className='content';w.append(c);
-  c.innerHTML=`<h2>${p.account.display_name||p.account.acct}</h2><p>${p.content.replace(/<[^>]+>/g,'')}</p>`;
+  const headline=p._suggested?`<span style="font-size:.78rem;background:#f0f9ff;color:#0369a1;padding:.15rem .45rem;border-radius:6px;margin-right:.35rem">neu</span>`:'';
+  c.innerHTML=`${headline}<h2 style="display:inline">${p.account.display_name||p.account.acct}</h2><p>${p.content.replace(/<[^>]+>/g,'')}</p>`;
   if(p.card){
     c.insertAdjacentHTML('beforeend',`<a class="linkHero" href="${p.card.url}" target="_blank">
       ${p.card.image?`<img src="${p.card.image}">`:''}
@@ -128,11 +142,12 @@ function home(){
   box.innerHTML='<h3 style="font-weight:600;margin-bottom:.8rem">Kategorien</h3>';
   const cats=Object.entries(prefs.topics).sort((a,b)=>b[1]-a[1]);
   if(!cats.length)box.insertAdjacentHTML('beforeend','<p class="empty">Swipe ein paar Posts, um Interessen zu sammeln.</p>');
-  cats.slice(0,6).forEach(([t])=>box.insertAdjacentHTML('beforeend',`<span class="tag">${t}</span>`));
-  /* Vorschläge */
-  const ht=Object.entries(prefs.tags).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
-  const sug=ht.find(t=>!(prefs.followedTags||[]).includes(t));
-  if(sug)box.insertAdjacentHTML('beforeend',`<h3 style="font-weight:600;margin:1.4rem 0 .8rem">Folge-Empfehlung</h3><span class="tag">#${sug}</span>`);
+  cats.slice(0,10).forEach(([t])=>box.insertAdjacentHTML('beforeend',`<span class="tag">${t}</span>`));
+  /* Follow suggestions */
+  if(suggestions.length){
+    box.insertAdjacentHTML('beforeend','<h3 style="font-weight:600;margin:1.4rem 0 .8rem">Leute, die dich interessieren könnten</h3>');
+    suggestions.slice(0,6).forEach(su=>box.insertAdjacentHTML('beforeend',`<span class="acct">@${su.account.acct}</span>`));
+  }
   stage.append(box);
 }
 
@@ -140,7 +155,8 @@ function swipe(){
   stage.innerHTML='';
   const holder=document.createElement('div');holder.style.width='100%';holder.style.height='100%';stage.append(holder);
   const show=()=>{holder.innerHTML='';if(!posts[idx])return;const p=posts[idx];
-    inter[p.id].v++;
+    const k=keyOf(p);
+    inter[k].v++;
     addTags(p);
     prefs.accounts[p.account.id]=(prefs.accounts[p.account.id]||0);
     save();
@@ -155,7 +171,12 @@ function swipe(){
     startY=null;
   },{passive:true});
   window.onhashchange=()=>{const id=location.hash.slice(1);if(!id){show();return;}const p=posts.find(x=>x.id==id);if(!p){show();return;}holder.innerHTML='';const d=document.createElement('div');d.className='card';d.style.overflowY='auto';d.innerHTML=card(p).innerHTML;holder.append(d);};
-  const need=()=>{if(posts.length-idx<20&&next)api(next).then(merge).catch(()=>{});} ;show();
+  const need=()=>{
+    if(posts.length-idx<20){
+      if(next)api(next).then(merge).catch(()=>{});
+      else loadTrending();
+    }
+  } ;show();
 }
 
 function settings(){
@@ -176,14 +197,15 @@ function render(){stage.innerHTML='';if(tab==='home')home();if(tab==='swipe')swi
 
 /* --- Like Toggle + Herz Overlay --- */
 function toggleLike(p,heart){
-  ensure(p.id);const liked=!!inter[p.id].l;
+  const k=keyOf(p);
+  ensure(k);const liked=!!inter[k].l;
   api(`/api/v1/statuses/${p.id}/${liked?'unfavourite':'favourite'}`,'POST').catch(()=>{});
-  inter[p.id].l=liked?0:1;save();
+  inter[k].l=liked?0:1;save();
   heart.style.opacity=1;heart.style.transform='translate(-50%,-50%) scale(1)';setTimeout(()=>{heart.style.opacity=0;heart.style.transform='translate(-50%,-50%) scale(.2)';},300);
 }
 
 /* --- Loaders --- */
-async function init(){merge(await api('/api/v1/timelines/home?limit=120'));render();}
+async function init(){await Promise.all([loadSuggestions(),api('/api/v1/timelines/home?limit=120').then(merge)]);render();}
 async function refresh(){if(!tok)return;try{const fresh=await api(`/api/v1/timelines/home?limit=40&since_id=${posts[0]?.id||''}`);if(fresh.length){merge(fresh);idx=0;tab!=='swipe'&&render();}}catch{}finally{setTimeout(refresh,90000);}}
 
 /* --- OAuth PKCE --- */
@@ -194,10 +216,4 @@ async function oauth(){
 }
 (async()=>{const sp=new URLSearchParams(location.search);
   if(sp.has('code')){inst=localStorage.getItem(K.i);cid=localStorage.getItem(K.c);const ver=localStorage.getItem(K.v);
-    const body=new URLSearchParams({grant_type:'authorization_code',client_id:cid,code:sp.get('code'),redirect_uri:location.origin+location.pathname,code_verifier:ver});if(sec)body.append('client_secret',sec);
-    const t=await fetch(inst+'/oauth/token',{method:'POST',body}).then(r=>r.json());tok=t.access_token;localStorage.setItem(K.t,tok);history.replaceState({},'',location.pathname);} })();
-
-/* --- Boot --- */
-if(tok&&inst){init();refresh();}render();
-</script></body>
-</html>
+    const body=new URLSearchParams({grant_type:'authorization_code',client_id:cid,code:sp.get('code'),
