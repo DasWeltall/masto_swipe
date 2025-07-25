@@ -6,6 +6,7 @@
 <title>MastoSwipe Mobile</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
 <style>
 :root{--bg:#fafafa;--card:#ffffff;--accent:#0284c7;--txt:#1e293b;--sub:#64748b;--nav:66px}
 *{box-sizing:border-box;margin:0;font-family:'Inter',sans-serif;-webkit-tap-highlight-color:transparent}
@@ -15,20 +16,20 @@ nav{position:fixed;bottom:0;width:100%;height:var(--nav);display:flex;background
 nav button{flex:1;background:none;border:0;color:var(--sub);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:.8rem;gap:.2rem;cursor:pointer}
 nav button.active{color:var(--accent)}
 nav svg{width:24px;height:24px}
+
 /* Card */
 .card{width:100%;max-width:680px;height:100%;border-radius:18px;background:var(--card);box-shadow:0 8px 28px rgba(0,0,0,.08);display:flex;flex-direction:column;overflow:hidden}
 .card img.banner{width:100%;height:220px;object-fit:cover}
-.content{padding:1.45rem 1.3rem 3.2rem;overflow-y:auto}
+.content{padding:1.4rem 1.3rem 2.4rem;overflow-y:auto}
 .card h2{font-size:1.24rem;font-weight:600;color:var(--accent);margin-bottom:.6rem}
 .card p{font-size:1.01rem;line-height:1.55;margin-bottom:1rem}
-.preview{display:flex;gap:.9rem;border:1px solid #e2e8f0;border-radius:14px;padding:.85rem;margin-top:.7rem}
-.preview img{width:72px;height:72px;object-fit:cover;border-radius:12px}
-.preview .meta{flex:1}
-.preview .title{font-size:.9rem;font-weight:600;color:var(--txt);margin-bottom:.25rem}
-.preview .desc{font-size:.83rem;color:var(--sub);line-height:1.3}
-.like{position:absolute;bottom:1.6rem;right:1.6rem;width:52px;height:52px;border-radius:50%;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:1.4rem;background:#fff;color:var(--accent);box-shadow:0 4px 12px rgba(0,0,0,.12)}
-.like.liked{background:var(--accent);color:#fff}
+.hero-link{display:block;text-decoration:none;color:inherit;margin-top:.5rem}
+.hero-link img{width:100%;max-height:250px;object-fit:cover;border-radius:14px}
+.hero-meta{padding:.8rem .2rem}
+.hero-meta .title{font-size:1.02rem;font-weight:600;margin-bottom:.3rem}
+.hero-meta .desc{font-size:.86rem;color:var(--sub);line-height:1.35}
 .badge{position:absolute;top:.9rem;right:1.1rem;font-size:.78rem;color:var(--sub)}
+
 .section{padding:1.3rem 1rem 2.8rem}
 .tag,.acct{display:inline-block;background:#e2e8f0;margin:.35rem .5rem .35rem 0;padding:.5rem .9rem;border-radius:9999px;font-size:.85rem;color:#334155}
 input,button.set{width:100%;padding:.75rem;border-radius:10px;font-size:.9rem;margin-bottom:1rem;border:1px solid #e2e8f0}
@@ -51,129 +52,148 @@ button.set{border:0;font-weight:600;cursor:pointer}
 <script type="module">
 lucide.createIcons();
 
-/* --- Storage Keys & State --- */
-const K={i:'m_i',c:'m_c',s:'m_s',t:'m_t',v:'m_v',int:'m_int',pr:'m_pref'};
+/* --- Storage & State --- */
+const K={i:'m_i',c:'m_c',s:'m_s',t:'m_t',v:'m_v',in:'m_in',pr:'m_pr'};
 let inst=localStorage.getItem(K.i)||'',cid=localStorage.getItem(K.c)||'',sec=localStorage.getItem(K.s)||'',tok=localStorage.getItem(K.t)||'';
 let posts=[],idx=0,next=null;
-const inter=JSON.parse(localStorage.getItem(K.int)||'{}');
+const inter=JSON.parse(localStorage.getItem(K.in)||'{}');
 const prefs=JSON.parse(localStorage.getItem(K.pr)||'{"tags":{},"accounts":{},"topics":{}}');
-const save=()=>{localStorage.setItem(K.int,JSON.stringify(inter));localStorage.setItem(K.pr,JSON.stringify(prefs));};
+const save=()=>{localStorage.setItem(K.in,JSON.stringify(inter));localStorage.setItem(K.pr,JSON.stringify(prefs));};
 
-/* --- Topic Map (Hashtag → Kategorie) --- */
+/* --- Topic Map --- */
 const TOPIC_MAP={
-  wirtschaft:'Economy', finanzen:'Economy', business:'Economy',
-  hardware:'Hardware', cpu:'Hardware', gpu:'Hardware',
-  opensource:'Open-Source', foss:'Open-Source', linux:'Open-Source',
-  politik:'Politics', europe:'Politics', climate:'Climate', umwelt:'Climate'
+  wirtschaft:'Economy',business:'Economy',finanzen:'Economy',
+  hardware:'Hardware',cpu:'Hardware',gpu:'Hardware',
+  opensource:'Open-Source',foss:'Open-Source',linux:'Open-Source'
 };
 
-/* --- Util --- */
+/* --- Utils --- */
 const $=q=>document.querySelector(q);
 const rnd=()=>crypto.randomUUID().replace(/-/g,'');
 const sha=async s=>btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
-let startX,startY;const thresholdX=window.innerWidth*0.18,thresholdY=window.innerHeight*0.15;
-function ensure(id){if(!inter[id])inter[id]={v:0,c:0,l:0,d:0};}
 const now=()=>Date.now(),hrs=t=>(now()-t)/3.6e6;
-function score(p){ensure(p.id);const i=inter[p.id],pop=Math.log10(1+p.favourites_count+p.reblogs_count),dec=-.08*hrs(new Date(p.created_at)),tag=(p.tags||[]).reduce((s,t)=>s+(prefs.tags[t.name]||0)*.5,0),acc=(prefs.accounts[p.account.id]||0)*1.5,top=(p.tags||[]).reduce((s,t)=>s+(prefs.topics[TOPIC_MAP[t.name.toLowerCase()]||'']||0)*.7,0);return i.c*3+i.v+i.d*.15+i.l*5+pop+tag+acc+top+dec;}
-async function api(p,m='GET'){const u=p.startsWith('http')?p:inst+p;const r=await fetch(u,{method:m,headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)throw r;if(p.includes('/timelines/home')){const l=r.headers.get('Link');next=null;if(l){const m=l.match(/<([^>]+)>; rel="next"/);if(m)next=m[1];}}return r.json();}
-function merge(arr){arr.forEach(p=>{if(!posts.some(x=>x.id===p.id)){posts.push(p);ensure(p.id);}});posts.sort((a,b)=>score(b)-score(a));}
+function ensure(id){if(!inter[id])inter[id]={v:0,c:0,l:0,d:0};}
+function score(p){
+  ensure(p.id);
+  const i=inter[p.id],
+        pop=Math.log10(1+p.favourites_count+p.reblogs_count),
+        dec=-.08*hrs(new Date(p.created_at)),
+        tag=(p.tags||[]).reduce((s,t)=>s+(prefs.tags[t.name]||0)*.5,0),
+        acc=(prefs.accounts[p.account.id]||0)*1.5,
+        top=(p.tags||[]).reduce((s,t)=>s+(prefs.topics[TOPIC_MAP[t.name.toLowerCase()]||'']||0)*.7,0);
+  return i.c*3+i.v+i.d*.15+i.l*5+pop+tag+acc+top+dec;
+}
+async function api(p,m='GET'){
+  const u=p.startsWith('http')?p:inst+p;
+  const r=await fetch(u,{method:m,headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)throw r;
+  if(p.includes('/timelines/home')){const l=r.headers.get('Link');next=null;if(l){const m=l.match(/<([^>]+)>; rel=\"next\"/);if(m)next=m[1];}}
+  return r.json();
+}
+function merge(a){a.forEach(p=>{if(!posts.some(x=>x.id===p.id)){posts.push(p);ensure(p.id);}});posts.sort((a,b)=>score(b)-score(a));}
 
 /* --- Components --- */
 function makeCard(p){
-  const wrap=document.createElement('div');wrap.className='card';
-  if(p.media_attachments?.[0]?.type==='image'){wrap.insertAdjacentHTML('beforeend',`<img src="${p.media_attachments[0].preview_url}" class="banner">`);}
-  const body=document.createElement('div');body.className='content';
-  body.innerHTML=`<h2>${p.account.display_name||p.account.acct}</h2><p>${p.content.replace(/<[^>]+>/g,'')}</p>`;wrap.append(body);
-  if(p.card){body.insertAdjacentHTML('beforeend',`
-    <div class="preview">
-      ${p.card.image?`<img src="${p.card.image}">`:''}
-      <div class="meta"><div class="title">${p.card.title}</div><div class="desc">${p.card.provider_name||p.card.description||''}</div></div>
-    </div>`);}
-  const like=document.createElement('button');like.className='like';like.textContent='❤';if(inter[p.id].l)like.classList.add('liked');
-  like.onclick=e=>{e.stopPropagation();toggleLike(p,like);};
-  wrap.append(like);
-  const badge=document.createElement('div');badge.className='badge';badge.textContent=`${idx+1}/${posts.length}`;wrap.append(badge);
-  wrap.ondblclick=()=>toggleLike(p,like);
-  wrap.onclick=()=>location.hash='#'+p.id;
-  return wrap;
+  const wrapper=document.createElement('div');wrapper.className='card';
+  if(p.media_attachments?.[0]?.type==='image'){wrapper.insertAdjacentHTML('beforeend',`<img src="${p.media_attachments[0].preview_url}" class="banner">`);}
+  const cont=document.createElement('div');cont.className='content';
+  cont.innerHTML=`<h2>${p.account.display_name||p.account.acct}</h2><p>${p.content.replace(/<[^>]+>/g,'')}</p>`;wrapper.append(cont);
+  if(p.card){
+    const link=`
+      <a class="hero-link" href="${p.card.url}" target="_blank">
+        ${p.card.image?`<img src="${p.card.image}" alt="">`:''}
+        <div class="hero-meta">
+          <div class="title">${p.card.title}</div>
+          <div class="desc">${p.card.provider_name||p.card.description||''}</div>
+        </div>
+      </a>`;
+    cont.insertAdjacentHTML('beforeend',link);
+  }
+  wrapper.insertAdjacentHTML('beforeend',`<div class="badge">${idx+1}/${posts.length}</div>`);
+  wrapper.ondblclick=()=>toggleLike(p);
+  wrapper.onclick=()=>location.hash='#'+p.id;
+  return wrapper;
 }
 
 /* --- Pages --- */
 let tab='home';const stage=$('#stage');
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{if(b.dataset.tab===tab)return;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));tab=b.dataset.tab;render();});
 
-function renderHome(){
+function homePage(){
   const box=document.createElement('div');box.className='section';
   box.innerHTML='<h3 style="font-weight:600;margin-bottom:.8rem">Kategorien</h3>';
   Object.entries(prefs.topics).sort((a,b)=>b[1]-a[1]).slice(0,6).forEach(([t])=>{
     box.insertAdjacentHTML('beforeend',`<span class="tag">${t}</span>`);
   });
-  box.insertAdjacentHTML('beforeend','<h3 style="font-weight:600;margin:1.4rem 0 .8rem">Empfehlungen</h3>');
-  // simple: top unseen tag
+  box.insertAdjacentHTML('beforeend','<h3 style="font-weight:600;margin:1.4rem 0 .8rem">Empfehlung</h3>');
   const hotTag=Object.keys(prefs.tags).sort((a,b)=>prefs.tags[b]-prefs.tags[a]).find(t=>!(prefs.followedTags||[]).includes(t));
-  if(hotTag)box.insertAdjacentHTML('beforeend',`<div style="margin-bottom:.5rem">Folge doch <strong>#${hotTag}</strong></div>`);
+  if(hotTag)box.insertAdjacentHTML('beforeend',`<div style="font-size:.9rem">Folge doch <strong>#${hotTag}</strong></div>`);
   stage.append(box);
 }
 
-function renderSwipe(){
+function swipePage(){
   stage.innerHTML='';
-  const container=document.createElement('div');container.style.width='100%';container.style.height='100%';stage.append(container);
-  let touchStart=false;let sx=0,sy=0;
+  const holder=document.createElement('div');holder.style.width='100%';holder.style.height='100%';stage.append(holder);
 
   const show=()=>{
-    container.innerHTML='';if(!posts[idx])return;
+    holder.innerHTML='';if(!posts[idx])return;
     const p=posts[idx];
-    inter[p.id].v++; // view counted
-    prefs.accounts[p.account.id]=(prefs.accounts[p.account.id]||0); // touch active account
+    inter[p.id].v++; // view
     (p.tags||[]).forEach(t=>{
       prefs.tags[t.name]=(prefs.tags[t.name]||0)+1;
       const cat=TOPIC_MAP[t.name.toLowerCase()];if(cat)prefs.topics[cat]=(prefs.topics[cat]||0)+1;
     });
+    prefs.accounts[p.account.id]=(prefs.accounts[p.account.id]||0); // touch account
     save();
-    container.append(makeCard(p));
+    holder.append(makeCard(p));
   };
 
-  container.addEventListener('touchstart',e=>{if(e.touches.length!==1)return;touchStart=true;sx=e.touches[0].clientX;sy=e.touches[0].clientY;},{passive:true});
-  container.addEventListener('touchend',e=>{
-    if(!touchStart)return;touchStart=false;
+  let sx,sy;holder.addEventListener('touchstart',e=>{if(e.touches.length!==1)return;sx=e.touches[0].clientX;sy=e.touches[0].clientY;},{passive:true});
+  holder.addEventListener('touchend',e=>{
+    if(sx==null)return;
     const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;
     if(Math.abs(dx)>Math.abs(dy)){ // horizontal
-      if(dx<-thresholdX&&idx<posts.length-1){idx++;autoLoad();show();}
+      if(dx<-thresholdX&&idx<posts.length-1){idx++;needMore();show();}
       else if(dx>thresholdX&&idx>0){idx--;show();}
     }else{ // vertical
-      if(dy<-thresholdY&&idx<posts.length-1){idx++;autoLoad();show();}
+      if(dy<-thresholdY&&idx<posts.length-1){idx++;needMore();show();}
       else if(dy>thresholdY&&idx>0){idx--;show();}
     }
+    sx=sy=null;
   },{passive:true});
-
-  function autoLoad(){if(posts.length-idx<4&&next)api(next).then(merge).catch(()=>{});}
-  window.onhashchange=()=>{const id=location.hash.slice(1);if(!id){show();return;}const p=posts.find(x=>x.id==id);if(!p){show();return;}container.innerHTML='';const d=document.createElement('div');d.className='card';d.style.overflowY='auto';d.innerHTML=makeCard(p).innerHTML;container.append(d);};
+  const needMore=()=>{if(posts.length-idx<4&&next)api(next).then(merge).catch(()=>{});}
+  window.onhashchange=()=>{const id=location.hash.slice(1);if(!id){show();return;}const p=posts.find(x=>x.id==id);if(!p){show();return;}holder.innerHTML='';const d=document.createElement('div');d.className='card';d.style.overflowY='auto';d.innerHTML=makeCard(p).innerHTML;holder.append(d);};
   show();
 }
 
-function renderSettings(){
+function settingsPage(){
   stage.innerHTML='';
-  const s=document.createElement('div');s.className='section';
-  s.innerHTML=`<input id="inst" placeholder="https://mastodon.social" value="${inst}">
-  <button class="set" id="btnConnect">${tok?'Re-Login':'Connect'}</button>
-  <button class="set" id="btnLogout" ${tok?'':'disabled'}>Log-out</button>
-  <button class="set" id="btnExport" ${posts.length?'':'disabled'}>Export Data</button>
-  <button class="set" id="btnReset">Reset Stats</button>`;
-  stage.append(s);
+  const box=document.createElement('div');box.className='section';
+  box.innerHTML=`<input id="inst" placeholder="https://mastodon.social" value="${inst}">
+    <button class="set" id="btnConnect">${tok?'Re-Login':'Connect'}</button>
+    <button class="set" id="btnLogout" ${tok?'':'disabled'}>Log-out</button>
+    <button class="set" id="btnExport" ${posts.length?'':'disabled'}>Export Data</button>
+    <button class="set" id="btnReset">Reset Stats</button>`;
+  stage.append(box);
   $('#btnConnect').onclick=startOAuth;
-  $('#btnLogout').onclick=()=>{localStorage.removeItem(K.t);tok='';posts=[];idx=0;alert('Logged out');render();};
+  $('#btnLogout').onclick=()=>{localStorage.removeItem(K.t);tok='';posts=[];idx=0;render();};
   $('#btnExport').onclick=()=>{const b=new Blob([JSON.stringify({inter,prefs},null,2)],{type:'application/json'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='masto-data.json';a.click();URL.revokeObjectURL(u);};
   $('#btnReset').onclick=()=>{if(confirm('Tracking-Daten löschen?')){Object.keys(inter).forEach(k=>delete inter[k]);Object.keys(prefs.tags).forEach(k=>delete prefs.tags[k]);Object.keys(prefs.accounts).forEach(k=>delete prefs.accounts[k]);Object.keys(prefs.topics).forEach(k=>delete prefs.topics[k]);save();render();}};
 }
 
-function render(){stage.innerHTML='';if(tab==='home')renderHome();if(tab==='swipe')renderSwipe();if(tab==='settings')renderSettings();}
+function render(){stage.innerHTML='';if(tab==='home')homePage();if(tab==='swipe')swipePage();if(tab==='settings')settingsPage();}
 
-/* --- Network Loaders --- */
+/* --- Likes (dbl-tap) --- */
+async function toggleLike(p){
+  ensure(p.id);
+  const liked=!!inter[p.id].l;
+  api(`/api/v1/statuses/${p.id}/${liked?'unfavourite':'favourite'}`,'POST').catch(()=>{});
+  inter[p.id].l=liked?0:1;
+  save();
+}
+
+/* --- Loading & Refresh --- */
 async function init(){const j=await api('/api/v1/timelines/home?limit=50');merge(j);render();}
-async function auto(){if(!tok)return;try{const fresh=await api(`/api/v1/timelines/home?limit=30&since_id=${posts[0]?.id||''}`);if(fresh.length){merge(fresh);idx=0;tab!=='swipe'&&render();}}catch{}finally{setTimeout(auto,90000);}}
-
-/* --- Likes --- */
-async function toggleLike(p,btn){ensure(p.id);const liked=!!inter[p.id].l;api(`/api/v1/statuses/${p.id}/${liked?'unfavourite':'favourite'}`,'POST').catch(()=>{});inter[p.id].l=liked?0:1;btn.classList.toggle('liked');prefs.accounts[p.account.id]=(prefs.accounts[p.account.id]||0)+(liked?-1:1);save();}
+async function refresher(){if(!tok)return;try{const j=await api(`/api/v1/timelines/home?limit=30&since_id=${posts[0]?.id||''}`);if(j.length){merge(j);idx=0;tab!=='swipe'&&render();}}catch{}finally{setTimeout(refresher,90000);}}
 
 /* --- OAuth PKCE --- */
 async function startOAuth(){
@@ -183,13 +203,17 @@ async function startOAuth(){
   const ver=rnd(),chal=await sha(ver);localStorage.setItem(K.v,ver);
   const a=new URL(inst+'/oauth/authorize');a.searchParams.set('response_type','code');a.searchParams.set('client_id',cid);a.searchParams.set('redirect_uri',location.origin+location.pathname);a.searchParams.set('scope','read write:statuses');a.searchParams.set('code_challenge',chal);a.searchParams.set('code_challenge_method','S256');location.href=a.toString();
 }
-(async()=>{
-  const sp=new URLSearchParams(location.search);
-  if(sp.has('code')){inst=localStorage.getItem(K.i);cid=localStorage.getItem(K.c);const ver=localStorage.getItem(K.v);const body=new URLSearchParams({grant_type:'authorization_code',client_id:cid,code:sp.get('code'),redirect_uri:location.origin+location.pathname,code_verifier:ver});if(sec)body.append('client_secret',sec);const t=await fetch(inst+'/oauth/token',{method:'POST',body}).then(r=>r.json());tok=t.access_token;localStorage.setItem(K.t,tok);history.replaceState({},'',location.pathname);}
+
+(async()=>{const sp=new URLSearchParams(location.search);
+  if(sp.has('code')){inst=localStorage.getItem(K.i);cid=localStorage.getItem(K.c);const ver=localStorage.getItem(K.v);
+    const body=new URLSearchParams({grant_type:'authorization_code',client_id:cid,code:sp.get('code'),redirect_uri:location.origin+location.pathname,code_verifier:ver});
+    if(sec)body.append('client_secret',sec);
+    const t=await fetch(inst+'/oauth/token',{method:'POST',body}).then(r=>r.json());
+    tok=t.access_token;localStorage.setItem(K.t,tok);history.replaceState({},'',location.pathname);}
 })();
 
 /* --- Boot --- */
-if(tok&&inst){init();auto();}render();
+if(tok&&inst){init();refresher();}render();
 </script>
 </body>
 </html>
